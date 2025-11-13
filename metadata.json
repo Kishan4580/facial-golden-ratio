@@ -1,0 +1,7 @@
+{
+  "name": "Facial Golden Ratio Calculator",
+  "description": "An application to calculate facial proportions and compare them to the golden ratio using a live camera or an uploaded photo.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
