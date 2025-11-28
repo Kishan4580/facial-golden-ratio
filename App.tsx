@@ -18,6 +18,49 @@ const CameraIcon: React.FC = () => (
 const UploadIcon: React.FC = () => (
     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
 );
+const CheckIcon: React.FC = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-400 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+);
+const XIcon: React.FC = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-400 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+);
+
+const PhotoGuidelines = ({ onSelectFile }: { onSelectFile: () => void }) => (
+  <div className="bg-gray-800 p-6 md:p-8 rounded-2xl shadow-lg border border-gray-700 max-w-2xl mx-auto">
+    <h3 className="text-2xl font-bold text-cyan-300 mb-4 text-center">Photo Guidelines</h3>
+    <p className="text-gray-400 mb-6 text-center">For the most accurate Golden Ratio calculation, please ensure your photo meets these requirements:</p>
+    
+    <div className="grid md:grid-cols-2 gap-6 mb-8">
+      <div className="bg-gray-900/50 p-4 rounded-xl border border-gray-600">
+        <h4 className="font-bold text-green-400 mb-3 flex items-center"><CheckIcon /> Do This</h4>
+        <ul className="space-y-2 text-sm text-gray-300">
+          <li className="flex items-start"><span className="mr-2">•</span> Look straight at the camera (Frontal view).</li>
+          <li className="flex items-start"><span className="mr-2">•</span> Keep a neutral expression (mouth closed).</li>
+          <li className="flex items-start"><span className="mr-2">•</span> Ensure your face is evenly lit.</li>
+          <li className="flex items-start"><span className="mr-2">•</span> Pull hair back to reveal forehead and ears.</li>
+          <li className="flex items-start"><span className="mr-2">•</span> <strong>Only one person</strong> in the photo.</li>
+        </ul>
+      </div>
+      
+      <div className="bg-gray-900/50 p-4 rounded-xl border border-gray-600">
+        <h4 className="font-bold text-red-400 mb-3 flex items-center"><XIcon /> Avoid This</h4>
+        <ul className="space-y-2 text-sm text-gray-300">
+          <li className="flex items-start"><span className="mr-2">•</span> Multiple people in the frame.</li>
+          <li className="flex items-start"><span className="mr-2">•</span> Objects blocking the face (hands, masks).</li>
+          <li className="flex items-start"><span className="mr-2">•</span> Smiling, frowning, or open mouth.</li>
+          <li className="flex items-start"><span className="mr-2">•</span> Glasses or heavy shadows.</li>
+        </ul>
+      </div>
+    </div>
+
+    <button 
+      onClick={onSelectFile} 
+      className="w-full bg-cyan-500 hover:bg-cyan-600 text-gray-900 font-bold py-3 px-6 rounded-lg transition-transform transform hover:scale-[1.02] flex items-center justify-center"
+    >
+      <UploadIcon /> Select Photo
+    </button>
+  </div>
+);
 
 const App: React.FC = () => {
   const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -79,10 +122,14 @@ const App: React.FC = () => {
     } else {
       stopVideoStream();
       setMode('upload');
-      fileInputRef.current?.click();
+      // Do not click file input immediately, let user see guidelines first
     }
   };
   
+  const handleFileClick = () => {
+    fileInputRef.current?.click();
+  };
+
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -110,14 +157,34 @@ const App: React.FC = () => {
   const analyzeImage = async () => {
     if (!imageRef.current) return;
 
-    setLoading('Analyzing face... This may take a moment.');
+    setLoading('Detecting faces...');
     setError(null);
     setResults(null);
 
     try {
+      const options = new faceapi.TinyFaceDetectorOptions();
+
+      // Step 1: Check for multiple faces or no faces
+      const allFaces = await faceapi.detectAllFaces(imageRef.current, options);
+      
+      if (allFaces.length === 0) {
+        setError('No face detected. The photo might be too dark, or the face isn\'t clearly visible.');
+        setLoading(null);
+        return;
+      }
+
+      if (allFaces.length > 1) {
+        setError(`Multiple faces detected (${allFaces.length}). Please ensure only one person is in the photo for accurate analysis.`);
+        setLoading(null);
+        return;
+      }
+
+      // Step 2: If exactly one face, perform detailed landmark detection
+      setLoading('Analyzing facial structure...');
+      
       const detectionPromise = faceapi.detectSingleFace(
         imageRef.current, 
-        new faceapi.TinyFaceDetectorOptions()
+        options
       ).withFaceLandmarks();
 
       const timeoutPromise = new Promise((_, reject) => {
@@ -127,18 +194,18 @@ const App: React.FC = () => {
         }, ANALYSIS_TIMEOUT);
       });
 
-      const detections: any = await Promise.race([
+      const detection: any = await Promise.race([
         detectionPromise,
         timeoutPromise
       ]);
 
-      if (!detections) {
-        setError('No face detected. Please try another photo with better lighting and a clear view of the face.');
+      if (!detection) {
+        setError('Face detected, but landmarks could not be found. Please ensure nothing is blocking the face (mask, hand, etc.) and lighting is good.');
         setLoading(null);
         return;
       }
 
-      const landmarks = detections.landmarks;
+      const landmarks = detection.landmarks;
       const jaw = landmarks.getJawOutline();
       // Ratios calculation
       const faceWidth = calculateDistance(jaw[0], jaw[16]);
@@ -167,7 +234,7 @@ const App: React.FC = () => {
       const totalScore = scores.reduce((acc, score) => acc + score, 0) / scores.length;
 
       setResults({
-          landmarks: detections.landmarks,
+          landmarks: detection.landmarks,
           ratios: calculatedRatios,
           score: totalScore
       });
@@ -175,9 +242,9 @@ const App: React.FC = () => {
     } catch (e: any) {
       console.error("Analysis Error:", e);
       if (e.message && e.message.includes('timed out')) {
-          setError('Analysis took too long. Please try again with a clearer photo or check your browser performance.');
+          setError('Analysis took too long. Please try again with a smaller or clearer photo.');
       } else {
-          setError('Could not analyze the image. The face might be too small, angled, or unclear.');
+          setError('Could not analyze the image. Please ensure the face is clearly visible and facing forward.');
       }
     } finally {
         setLoading(null);
@@ -186,7 +253,12 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (imageSrc && imageRef.current) {
-        analyzeImage();
+        // Wait for image to load in DOM
+        if (imageRef.current.complete) {
+            analyzeImage();
+        } else {
+            imageRef.current.onload = () => analyzeImage();
+        }
     }
   }, [imageSrc]);
 
@@ -238,6 +310,15 @@ const App: React.FC = () => {
     setMode('select');
     if(fileInputRef.current) fileInputRef.current.value = "";
   };
+
+  const reUpload = () => {
+    setImageSrc(null);
+    setResults(null);
+    setError(null);
+    setLoading(null);
+    if(fileInputRef.current) fileInputRef.current.value = "";
+    // Stays in 'upload' mode so guidelines show again
+  };
   
   const RatioBar = ({ value }: { value: number }) => {
     const closeness = (1 - Math.abs(value - GOLDEN_RATIO) / GOLDEN_RATIO) * 100;
@@ -273,7 +354,6 @@ const App: React.FC = () => {
               <button onClick={() => handleModeSelect('upload')} className="flex items-center justify-center bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-lg transition-transform transform hover:scale-105">
                 <UploadIcon /> Upload Photo
               </button>
-              <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
             </div>
           </div>
         )}
@@ -282,9 +362,22 @@ const App: React.FC = () => {
           <div className="bg-gray-800 p-4 md:p-8 rounded-2xl shadow-lg border border-gray-700 text-center">
             <video ref={videoRef} autoPlay playsInline muted className="w-full max-w-lg mx-auto rounded-lg mb-4"></video>
             <button onClick={handleCapture} className="bg-cyan-500 hover:bg-cyan-600 text-gray-900 font-bold py-3 px-6 rounded-lg transition-transform transform hover:scale-105">Capture & Analyze</button>
+             <button onClick={reset} className="block mt-4 text-sm text-gray-400 hover:text-white mx-auto">Cancel</button>
           </div>
         )}
 
+        {/* Hidden File Input */}
+        <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
+
+        {/* Upload Mode: Show Guidelines if no image selected */}
+        {mode === 'upload' && !imageSrc && !loading && (
+          <div>
+            <PhotoGuidelines onSelectFile={handleFileClick} />
+            <button onClick={reset} className="block mt-6 text-sm text-gray-400 hover:text-white mx-auto underline">Cancel and go back</button>
+          </div>
+        )}
+
+        {/* Results / Error View */}
         {(mode === 'upload' && imageSrc) && (
           <div className="grid md:grid-cols-2 gap-8 items-start">
             <div className="relative bg-gray-800 p-4 rounded-2xl shadow-lg border border-gray-700">
@@ -315,10 +408,20 @@ const App: React.FC = () => {
                   <button onClick={reset} className="w-full mt-8 bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-lg">Analyze Another</button>
                 </div>
               ) : error ? (
-                <div>
-                  <h2 className="text-2xl text-red-400 font-bold mb-4">Error</h2>
-                  <p className="text-gray-300">{error}</p>
-                   <button onClick={reset} className="w-full mt-8 bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-6 rounded-lg">Try Again</button>
+                <div className="text-center">
+                  <h2 className="text-2xl text-red-400 font-bold mb-4">Detection Error</h2>
+                  <p className="text-gray-300 mb-6">{error}</p>
+                  <div className="bg-gray-900/50 p-4 rounded-lg text-left text-sm text-gray-400 mb-6">
+                     <p className="font-bold mb-2">Tip: Check the guidelines</p>
+                     <ul className="list-disc pl-5 space-y-1">
+                       <li>Face directly towards camera</li>
+                       <li>Ensure only <strong>one person</strong> is in view</li>
+                       <li>Neutral expression (no smiling)</li>
+                       <li>Good lighting</li>
+                     </ul>
+                  </div>
+                   <button onClick={reUpload} className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 px-6 rounded-lg">Try Another Photo</button>
+                   <button onClick={reset} className="block mt-4 text-sm text-gray-400 hover:text-white mx-auto">Go Home</button>
                 </div>
               ) : null}
             </div>
